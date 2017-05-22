@@ -55,7 +55,8 @@
   extern float probe_pt(float x, float y, bool, int);
   extern bool set_probe_deployed(bool);
   void smart_fill_mesh();
-  void smart_fill_wlsf(float);
+  void smart_fill_wlsf_all(float);
+  bool smart_fill_wlsf_single(uint8_t, uint8_t, float);
   float measure_business_card_thickness(float &in_height);
   void manually_probe_remaining_mesh(const float&, const float&, const float&, const float&, const bool);
 
@@ -543,7 +544,7 @@
 
                   const float weight_power  = (cvf - 3.10) * 100.0;  // 3.12345 -> 2.345
                   const float weight_factor = weight_power ? pow( 10.0, weight_power ) : 0;
-                  smart_fill_wlsf( weight_factor );
+                  smart_fill_wlsf_all( weight_factor );
                 }
                 break;
               #endif
@@ -1709,61 +1710,90 @@
     // Note: using optimize("O2") for this routine results in smaller
     // codegen than default optimize("Os") on A2560.
 
-    void _O2 smart_fill_wlsf( float weight_factor ) {
+    bool _O2 smart_fill_wlsf_single( uint8_t igx, uint8_t igy, float weight_factor ) {
 
-      // For each undefined mesh point, compute a distance-weighted least squares fit
-      // from all the originally populated mesh points, weighted toward the point
-      // being extrapolated so that nearby points will have greater influence on
-      // the point being extrapolated.  Then extrapolate the mesh point from WLSF.
+      // Compute a distance-weighted least squares fit from all the populated
+      // mesh points, weighted toward the point being extrapolated so that nearby
+      // points will have greater influence on the point being extrapolated.
 
-      static_assert( GRID_MAX_POINTS_Y <= 16, "GRID_MAX_POINTS_Y too big" );
-      uint16_t bitmap[GRID_MAX_POINTS_X] = {0};
       struct linear_fit_data lsf_results;
+      incremental_LSF_reset(&lsf_results);
+
+      const float weight_scaled = weight_factor * max(MESH_X_DIST, MESH_Y_DIST);
+      const float px = pgm_read_float(&(ubl.mesh_index_to_xpos[igx]));
+      const float py = pgm_read_float(&(ubl.mesh_index_to_ypos[igy]));
+      ubl.z_values[igx][igy] = NAN; // invalidate target so not used in computation
+      
+      for (uint8_t jx = 0; jx < GRID_MAX_POINTS_X; jx++) {
+        const float rx = pgm_read_float(&(ubl.mesh_index_to_xpos[jx]));
+        for (uint8_t jy = 0; jy < GRID_MAX_POINTS_Y; jy++) {
+          const float rz = ubl.z_values[jx][jy];
+          if ( ! isnan( rz )) {
+            const float ry = pgm_read_float(&(ubl.mesh_index_to_ypos[jy]));
+            const float w  = 1.0 + weight_scaled / HYPOT((rx - px),(ry - py));
+            incremental_WLSF(&lsf_results, rx, ry, rz, w);
+          }
+        }
+      }
+
+      if (finish_incremental_LSF(&lsf_results))   // insufficient mesh for computation
+        return false;
+
+      ubl.z_values[igx][igy] = -lsf_results.D - lsf_results.A * px - lsf_results.B * py;
+      return true;
+    }
+
+    void _O2 smart_fill_wlsf_all( float weight_factor ) {
+
+      // Starting from center and working toward edges, find undefined mesh points
+      // and extrapolate using a distance-weighted least squares fit.  This "pushes"
+      // the extrapolation outward.
 
       SERIAL_ECHOPGM("Extrapolating mesh...");
 
-      const float weight_scaled = weight_factor * max(MESH_X_DIST, MESH_Y_DIST);
+      const float cx = X_CENTER + (X_PROBE_OFFSET_FROM_EXTRUDER * 0.001);   // bias slightly toward probe
+      const float cy = Y_CENTER + (Y_PROBE_OFFSET_FROM_EXTRUDER * 0.001);
 
-      for (uint8_t jx = 0; jx < GRID_MAX_POINTS_X; jx++) {
-        for (uint8_t jy = 0; jy < GRID_MAX_POINTS_Y; jy++) {
-          if ( !isnan( ubl.z_values[jx][jy] )) {
-            bitmap[jx] |= (uint16_t)1 << jy;
-          }
-        }
-      }
+      do {
 
-      for (uint8_t ix = 0; ix < GRID_MAX_POINTS_X; ix++) {
-        const float px = pgm_read_float(&(ubl.mesh_index_to_xpos[ix]));
-        for (uint8_t iy = 0; iy < GRID_MAX_POINTS_Y; iy++) {
-          const float py = pgm_read_float(&(ubl.mesh_index_to_ypos[iy]));
-          if ( isnan( ubl.z_values[ix][iy] )) {
-            // undefined mesh point at (px,py), compute weighted LSF from original valid mesh points.
-            incremental_LSF_reset(&lsf_results);
-            for (uint8_t jx = 0; jx < GRID_MAX_POINTS_X; jx++) {
-              const float rx = pgm_read_float(&(ubl.mesh_index_to_xpos[jx]));
-              for (uint8_t jy = 0; jy < GRID_MAX_POINTS_Y; jy++) {
-                if ( bitmap[jx] & (uint16_t)1 << jy ) {
-                  const float ry = pgm_read_float(&(ubl.mesh_index_to_ypos[jy]));
-                  const float rz = ubl.z_values[jx][jy];
-                  const float w  = 1.0 + weight_scaled / HYPOT((rx - px),(ry - py));
-                  incremental_WLSF(&lsf_results, rx, ry, rz, w);
-                }
+        // Find next invalid mesh point closest to center of bed.
+        //  (can't use find_closest_mesh_point because it does not
+        //   return unreachable mesh points which we need to fill).
+
+        int8_t ixf = -1;
+        int8_t iyf = -1;
+        float  d2f = 1e30f;
+
+        for (uint8_t ix = 0; ix < GRID_MAX_POINTS_X; ix++) {
+          for (uint8_t iy = 0; iy < GRID_MAX_POINTS_Y; iy++) {
+            if ( isnan( ubl.z_values[ix][iy] )) {
+              const float rx = pgm_read_float(&ubl.mesh_index_to_xpos[ix]);
+              const float ry = pgm_read_float(&ubl.mesh_index_to_ypos[iy]);
+              const float d2 = HYPOT2(rx - cx, ry - cy);  // no need for HYPOT sqrt
+              if (d2 < d2f) {
+                d2f = d2;
+                ixf = ix;
+                iyf = iy;
               }
             }
-            if (finish_incremental_LSF(&lsf_results)) {
-              SERIAL_ECHOLNPGM("Insufficient data");
-              return;
-            }
-            const float ez = -lsf_results.D - lsf_results.A * px - lsf_results.B * py;
-            ubl.z_values[ix][iy] = ez;
-            idle();   // housekeeping
           }
         }
-      }
+
+        if (ixf < 0) // no more invalid points
+          break;
+
+        if ( ! smart_fill_wlsf_single( ixf, iyf, weight_factor )) {
+          SERIAL_ECHOLNPGM("Insufficient data");
+          return;
+        }
+
+        idle();   // housekeeping
+
+      } while (true);
 
       SERIAL_ECHOLNPGM("done");
     }
-  #endif // UBL_G29_P31
 
+  #endif // UBL_G29_P31
 
 #endif // AUTO_BED_LEVELING_UBL
