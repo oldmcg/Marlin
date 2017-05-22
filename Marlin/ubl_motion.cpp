@@ -502,7 +502,7 @@
      * Returns true if the caller did NOT update current_position, otherwise false.
      */
 
-    static bool ubl_prepare_linear_move_to(const float ltarget[XYZE], const float &feedrate) {
+    bool ubl_prepare_linear_move_to(const float ltarget[XYZE], const float &feedrate) {
 
       if (!position_is_reachable_xy(ltarget[X_AXIS], ltarget[Y_AXIS]))  // fail if moving outside reachable boundary
         return true; // did not move, so current_position still accurate
