@@ -11612,14 +11612,14 @@ void prepare_move_to_destination() {
   if (
     #if IS_KINEMATIC
       #if UBL_DELTA
-        ubl_prepare_linear_move_to(destination, feedrate_mm_s)
+        ubl_prepare_segmented_line_to(destination, feedrate_mm_s)
       #else
         prepare_kinematic_move_to(destination)
       #endif
     #elif ENABLED(DUAL_X_CARRIAGE)
       prepare_move_to_destination_dualx()
     #elif UBL_DELTA // will work for CARTESIAN too (smaller segments follow mesh more closely)
-      ubl_prepare_linear_move_to(destination, feedrate_mm_s)
+      ubl_prepare_segmented_line_to(destination, feedrate_mm_s)
     #else
       prepare_move_to_destination_cartesian()
     #endif

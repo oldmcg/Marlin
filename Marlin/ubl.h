@@ -54,7 +54,7 @@
 
   void debug_current_and_destination(const char * const title);
   void ubl_line_to_destination_cartesian(const float&, uint8_t);
-  bool ubl_prepare_linear_move_to(const float ltarget[XYZE], const float &feedrate );
+  bool ubl_prepare_segmented_line_to(const float ltarget[XYZE], const float &feedrate );
 
   // ubl_G29.cpp
 
