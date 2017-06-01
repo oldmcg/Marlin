@@ -120,6 +120,7 @@
       void display_map(const int);
       void reset();
       void invalidate();
+      void set_all_mesh_points_to_value(float);
       bool sanity_check();
 
       static ubl_state state;

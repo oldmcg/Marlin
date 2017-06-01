@@ -564,11 +564,10 @@
       
     }
 
-
     /**
      * Prepare a segmented linear move for DELTA/SCARA/CARTESIAN with UBL and FADE
      * semantics. This calls planner._buffer_line multiple times for small incremental
-     * moves. Returns true if moved and requires current_position update, otherwise false.
+     * moves. Returns false if moved and requires current_position update, true if no move.
      */
 
     bool ubl_prepare_segmented_line_to(const float ltarget[XYZE], const float &feedrate) {

@@ -745,7 +745,7 @@
     /**
      * Wait until all parameters are verified before altering the state!
      */
-    ubl.state.active = !code_seen('D');
+    set_bed_leveling_enabled(!code_seen('D'));
 
     return UBL_OK;
   }

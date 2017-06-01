@@ -326,8 +326,10 @@ int16_t code_value_temp_diff();
   extern float bilinear_grid_factor[2],
                z_values[GRID_MAX_POINTS_X][GRID_MAX_POINTS_Y];
   float bilinear_z_offset(const float logical[XYZ]);
-  void set_bed_leveling_enabled(bool enable=true);
 #endif
+
+void set_bed_leveling_enabled(bool enable=true);
+bool is_bed_leveling_enabled();
 
 #if ENABLED(AUTO_BED_LEVELING_UBL)
   typedef struct { double A, B, D; } linear_fit;
