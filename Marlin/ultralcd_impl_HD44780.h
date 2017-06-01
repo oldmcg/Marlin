@@ -28,6 +28,9 @@
  * These are the most common LCD character displays.
  */
 
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wunused-parameter"  // noisy warnings from macro expansion function definitions
+
 #include "utility.h"
 #include "duration_t.h"
 
@@ -1006,5 +1009,7 @@ static void lcd_implementation_status_screen() {
   }
 
 #endif // LCD_HAS_STATUS_INDICATORS
+
+#pragma GCC diagnostic pop
 
 #endif // ULTRALCD_IMPL_HD44780_H

@@ -1664,7 +1664,7 @@ inline void set_destination_to_current() { COPY(destination, current_position); 
 
     #if UBL_DELTA
       // ubl segmented line will do z-only moves in single segment
-      ubl_prepare_segmented_line_to(destination, MMS_SCALED(fr_mm_s ? fr_mm_s : feedrate_mm_s));
+      ubl.prepare_segmented_line_to(destination, MMS_SCALED(fr_mm_s ? fr_mm_s : feedrate_mm_s));
     #else
       if ( current_position[X_AXIS] == destination[X_AXIS]
         && current_position[Y_AXIS] == destination[Y_AXIS]
@@ -1674,7 +1674,7 @@ inline void set_destination_to_current() { COPY(destination, current_position); 
 
       planner.buffer_line_kinematic(destination, MMS_SCALED(fr_mm_s ? fr_mm_s : feedrate_mm_s), active_extruder);
     #endif
-    
+
     set_current_to_destination();
   }
 #endif // IS_KINEMATIC
@@ -2363,7 +2363,7 @@ static void clean_up_after_endstop_or_probe_move() {
    *   - Raise to the BETWEEN height
    * - Return the probed Z position
    */
-  float probe_pt(const float x, const float y, const bool stow/*=true*/, const int verbose_level/*=1*/) {
+  float probe_pt(const float &x, const float &y, const bool stow/*=true*/, const int verbose_level/*=1*/) {
     #if ENABLED(DEBUG_LEVELING_FEATURE)
       if (DEBUGGING(LEVELING)) {
         SERIAL_ECHOPAIR(">>> probe_pt(", x);
@@ -2439,7 +2439,7 @@ static void clean_up_after_endstop_or_probe_move() {
       return planner.abl_enabled;
     #endif
   }
-   
+
   void set_bed_leveling_enabled(bool enable/*=true*/) {
     #if ENABLED(MESH_BED_LEVELING)
 
@@ -3451,8 +3451,8 @@ inline void gcode_G7(
       return;
     }
 
-    destination[X_AXIS] = hasI ? pgm_read_float(&ubl.mesh_index_to_xpos[ix]) : current_position[X_AXIS];
-    destination[Y_AXIS] = hasJ ? pgm_read_float(&ubl.mesh_index_to_ypos[iy]) : current_position[Y_AXIS];
+    destination[X_AXIS] = hasI ? ubl.mesh_index_to_xpos(ix) : current_position[X_AXIS];
+    destination[Y_AXIS] = hasJ ? ubl.mesh_index_to_ypos(iy) : current_position[Y_AXIS];
     destination[Z_AXIS] = current_position[Z_AXIS]; //todo: perhaps add Z-move support?
     destination[E_AXIS] = current_position[E_AXIS];
 
@@ -3840,6 +3840,7 @@ inline void gcode_G28(const bool always_home_all) {
   #if ENABLED(DELTA)
 
     home_delta();
+    UNUSED(always_home_all);
 
   #else // NOT DELTA
 
@@ -5150,7 +5151,7 @@ void home_all_axes() { gcode_G28(true); }
      *      V0  Dry-run mode. Report settings and probe results. No calibration.
      *      V1  Report settings
      *      V2  Report settings and probe results
-     *      
+     *
      *   E1  Stow probe between each point (default)
      *   E0  Don't stow probe between points
      */
@@ -8855,7 +8856,7 @@ void quickstop_stepper() {
     const bool hasZ = code_seen('Z'), hasQ = !hasZ && code_seen('Q');
 
     if (hasC) {
-      const mesh_index_pair location = find_closest_mesh_point_of_type(REAL, current_position[X_AXIS], current_position[Y_AXIS], USE_NOZZLE_AS_REFERENCE, NULL, false);
+      const mesh_index_pair location = ubl.find_closest_mesh_point_of_type(REAL, current_position[X_AXIS], current_position[Y_AXIS], USE_NOZZLE_AS_REFERENCE, NULL, false);
       ix = location.x_index;
       iy = location.y_index;
     }
@@ -11627,7 +11628,7 @@ void set_current_from_steppers_for_axis(const AxisEnum axis) {
     #if ENABLED(AUTO_BED_LEVELING_UBL)
       const float fr_scaled = MMS_SCALED(feedrate_mm_s);
       if (ubl.state.active) {
-        ubl_line_to_destination_cartesian(fr_scaled, active_extruder);
+        ubl.line_to_destination_cartesian(fr_scaled, active_extruder);
         return true;
       }
       else
@@ -11772,14 +11773,14 @@ void prepare_move_to_destination() {
   if (
     #if IS_KINEMATIC
       #if UBL_DELTA
-        ubl_prepare_segmented_line_to(destination, feedrate_mm_s)
+        ubl.prepare_segmented_line_to(destination, feedrate_mm_s)
       #else
         prepare_kinematic_move_to(destination)
       #endif
     #elif ENABLED(DUAL_X_CARRIAGE)
       prepare_move_to_destination_dualx()
     #elif UBL_DELTA // will work for CARTESIAN too (smaller segments follow mesh more closely)
-      ubl_prepare_segmented_line_to(destination, feedrate_mm_s)
+      ubl.prepare_segmented_line_to(destination, feedrate_mm_s)
     #else
       prepare_move_to_destination_cartesian()
     #endif

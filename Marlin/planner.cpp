@@ -399,10 +399,10 @@ void Planner::recalculate() {
  * Maintain fans, paste extruder pressure,
  */
 void Planner::check_axes_activity() {
-  unsigned char axis_active[NUM_AXIS] = { 0 },
-                tail_fan_speed[FAN_COUNT];
+  unsigned char axis_active[NUM_AXIS] = { 0 };
 
   #if FAN_COUNT > 0
+    unsigned char tail_fan_speed[FAN_COUNT];
     for (uint8_t i = 0; i < FAN_COUNT; i++) tail_fan_speed[i] = fanSpeeds[i];
   #endif
 
@@ -535,6 +535,7 @@ void Planner::check_axes_activity() {
   void Planner::apply_leveling(float &lx, float &ly, float &lz) {
 
     #if ENABLED(AUTO_BED_LEVELING_UBL) && UBL_DELTA  // probably should also be enabled for UBL without UBL_DELTA
+
       if (!ubl.state.active) return;
       #if ENABLED(ENABLE_LEVELING_FADE_HEIGHT)
         // if z_fade_height enabled (nonzero) and raw_z above it, no leveling required
@@ -543,56 +544,58 @@ void Planner::check_axes_activity() {
       #else // no fade
         lz += ubl.state.z_offset + ubl.get_z_correction(lx,ly);
       #endif // FADE
-    #endif // UBL
 
-    #if HAS_ABL
-      if (!abl_enabled) return;
-    #endif
+    #else // !UBL
 
-    #if ENABLED(ENABLE_LEVELING_FADE_HEIGHT)
-      static float z_fade_factor = 1.0, last_raw_lz = -999.0;
-      if (z_fade_height) {
-        const float raw_lz = RAW_Z_POSITION(lz);
-        if (raw_lz >= z_fade_height) return;
-        if (last_raw_lz != raw_lz) {
-          last_raw_lz = raw_lz;
-          z_fade_factor = 1.0 - raw_lz * inverse_z_fade_height;
+      #if HAS_ABL
+        if (!abl_enabled) return;
+      #endif
+
+      #if ENABLED(ENABLE_LEVELING_FADE_HEIGHT)
+        static float z_fade_factor = 1.0, last_raw_lz = -999.0;
+        if (z_fade_height) {
+          const float raw_lz = RAW_Z_POSITION(lz);
+          if (raw_lz >= z_fade_height) return;
+          if (last_raw_lz != raw_lz) {
+            last_raw_lz = raw_lz;
+            z_fade_factor = 1.0 - raw_lz * inverse_z_fade_height;
+          }
         }
-      }
-      else
-        z_fade_factor = 1.0;
-    #endif
+        else
+          z_fade_factor = 1.0;
+      #endif
 
-    #if ENABLED(MESH_BED_LEVELING)
+      #if ENABLED(MESH_BED_LEVELING)
 
-      if (mbl.active())
-        lz += mbl.get_z(RAW_X_POSITION(lx), RAW_Y_POSITION(ly)
+        if (mbl.active())
+          lz += mbl.get_z(RAW_X_POSITION(lx), RAW_Y_POSITION(ly)
+            #if ENABLED(ENABLE_LEVELING_FADE_HEIGHT)
+              , z_fade_factor
+            #endif
+            );
+
+      #elif ABL_PLANAR
+
+        float dx = RAW_X_POSITION(lx) - (X_TILT_FULCRUM),
+              dy = RAW_Y_POSITION(ly) - (Y_TILT_FULCRUM),
+              dz = RAW_Z_POSITION(lz);
+
+        apply_rotation_xyz(bed_level_matrix, dx, dy, dz);
+
+        lx = LOGICAL_X_POSITION(dx + X_TILT_FULCRUM);
+        ly = LOGICAL_Y_POSITION(dy + Y_TILT_FULCRUM);
+        lz = LOGICAL_Z_POSITION(dz);
+
+      #elif ENABLED(AUTO_BED_LEVELING_BILINEAR)
+
+        float tmp[XYZ] = { lx, ly, 0 };
+        lz += bilinear_z_offset(tmp)
           #if ENABLED(ENABLE_LEVELING_FADE_HEIGHT)
-            , z_fade_factor
+            * z_fade_factor
           #endif
-          );
+        ;
 
-    #elif ABL_PLANAR
-
-      float dx = RAW_X_POSITION(lx) - (X_TILT_FULCRUM),
-            dy = RAW_Y_POSITION(ly) - (Y_TILT_FULCRUM),
-            dz = RAW_Z_POSITION(lz);
-
-      apply_rotation_xyz(bed_level_matrix, dx, dy, dz);
-
-      lx = LOGICAL_X_POSITION(dx + X_TILT_FULCRUM);
-      ly = LOGICAL_Y_POSITION(dy + Y_TILT_FULCRUM);
-      lz = LOGICAL_Z_POSITION(dz);
-
-    #elif ENABLED(AUTO_BED_LEVELING_BILINEAR)
-
-      float tmp[XYZ] = { lx, ly, 0 };
-      lz += bilinear_z_offset(tmp)
-        #if ENABLED(ENABLE_LEVELING_FADE_HEIGHT)
-          * z_fade_factor
-        #endif
-      ;
-
+      #endif
     #endif
   }
 
