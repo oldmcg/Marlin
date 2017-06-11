@@ -1551,7 +1551,7 @@ inline void set_destination_to_current() { COPY(destination, current_position); 
 
       planner.buffer_line_kinematic(destination, MMS_SCALED(fr_mm_s ? fr_mm_s : feedrate_mm_s), active_extruder);
     #endif
-    
+
     set_current_to_destination();
   }
 #endif // IS_KINEMATIC
@@ -2362,7 +2362,7 @@ static void clean_up_after_endstop_or_probe_move() {
           else {                                        // leveling from off to on
             ubl.state.active = true;                    // enable BEFORE calling unapply_leveling, otherwise ignored
             // change physical current_position to unleveled current_position without moving steppers.
-            planner.unapply_leveling(current_position); 
+            planner.unapply_leveling(current_position);
           }
         #else
           ubl.state.active = enable;                    // just flip the bit, current_position will be wrong until next move.
@@ -5421,6 +5421,214 @@ void home_all_axes() { gcode_G28(true); }
 
 #endif // HAS_BED_PROBE
 
+#if ENABLED(DELTA) && ENABLED(G331_DSS)
+
+  #if ENABLED(G331_DETAILS)
+    #define DETAIL331(x) x
+  #else
+    #define DETAIL331(x) NOOP
+  #endif
+
+  struct _DSS dss;
+
+  static void inline delta_timing_move_xyz( const float &lx, const float &ly, const float &lz) {
+    destination[X_AXIS] = lx;
+    destination[Y_AXIS] = ly;
+    destination[Z_AXIS] = lz;
+    destination[E_AXIS] = current_position[E_AXIS];
+    prepare_move_to_destination();
+  }
+
+  static void delta_timing_init() {
+    memset(&dss,0,sizeof(dss));
+    dss.enabled = true;
+  }
+
+  static void delta_timing_test(float fr_mm_s) {
+    SERIAL_PROTOCOLLNPGM("delta_timing_test() under construction");
+
+    char str[8];  // for dtostrf
+
+    const float zmid = delta_clip_start_height / 2;
+    float tradius = DELTA_PRINTABLE_RADIUS  / 2;
+
+    if ( !axis_known_position[X_AXIS] || !axis_known_position[Y_AXIS] || !axis_known_position[Z_AXIS]) {
+      home_delta();
+    }
+
+    do_blocking_move_to_z( delta_clip_start_height / 2, MMM_TO_MMS(HOMING_FEEDRATE_Z));
+
+    delta_timing_move_xyz( -tradius, -tradius * 0.1, zmid );
+
+    uint16_t idss = delta_segments_per_second;    // start with current value
+    uint16_t idss_high = idss * 4;                // for default dss=200 this gives
+    uint16_t idss_low  = idss / 4;                // 50..800 search range
+
+    do {
+
+      idss = (idss_low + idss_high) / 2;
+      delta_segments_per_second = idss;
+      feedrate_mm_s = fr_mm_s;
+
+      DETAIL331(SERIAL_PROTOCOLPGM("Testing segments per second: "));
+      DETAIL331(SERIAL_PROTOCOLLN(idss));
+
+      delta_timing_init();
+
+      do {
+        delta_timing_move_xyz( tradius, tradius * 0.1, zmid );
+        tradius = -tradius;
+      }
+      while ((dss.notfull_n + dss.fullbuf_n) < 250 );
+
+      idle();                 // housekeeping
+      stepper.synchronize();  // wait for last move to complete
+
+      DETAIL331(SERIAL_PROTOCOLPGM("fullbuff: "));
+      DETAIL331(SERIAL_PROTOCOLLN(dtostrf(dss.fullbuf_n,6,0,str)));
+      DETAIL331(SERIAL_PROTOCOLPGM("notfull: "));
+      DETAIL331(SERIAL_PROTOCOLLN(dtostrf(dss.notfull_n,6,0,str)));
+
+      float ratio = dss.notfull_n ? ((float)dss.fullbuf_n / (float)dss.notfull_n) : 0;
+      DETAIL331(SERIAL_PROTOCOLPGM("FullRatio: "));
+      DETAIL331(SERIAL_PROTOCOLLN(dtostrf(ratio, 6, 2, str)));
+
+      if ( ratio > 2 ) {    // keeping planner buffer full 2X more than not
+        idss_low = idss;
+      } else {              // can't keep planner buffer full, back off
+        idss_high = idss - 1;
+      }
+
+    }
+    while ( idss_low < idss_high );
+
+    idss = min( idss_low, idss_high );
+    delta_segments_per_second = idss;
+
+    SERIAL_PROTOCOLPGM("Recommend DELTA_SEGMENTS_PER_SECOND ");
+    SERIAL_PROTOCOLLN(idss);
+
+    delta_timing_move_xyz( 0, 0, zmid );
+  }
+
+  #define SERIAL_PADDED_PGM(str,width) serial_padded_pgm(PSTR(str),width)
+
+  static void serial_padded_pgm(const char* pstr, uint8_t w) {
+    while (char ch = w ? pgm_read_byte(pstr++) : 0) { SERIAL_CHAR(ch); --w; }
+    while (w--) SERIAL_CHAR(' ');
+  }
+
+  static void delta_timing_report_t_n(uint32_t tt, uint32_t n) {
+      char str[8];
+      const float at = n ? ((float)tt/(n*1000)) : 0;    // average time ms from total time microsecs
+      SERIAL_PROTOCOL(dtostrf(at, 7, 3, str));          // %7.3f
+      SERIAL_PROTOCOLPGM("ms,");
+      SERIAL_PROTOCOL(dtostrf(n, 7, 0, str));           // %7.0f
+      SERIAL_PROTOCOLLNPGM(" samples");
+  }
+
+  static void delta_timing_report() {
+
+    char str[8]; // for dtostrf
+
+    SERIAL_PADDED_PGM("DeltaSegmentsPerSecond:", 25);
+    SERIAL_PROTOCOLLN(dtostrf(delta_segments_per_second,7,0,str));
+
+    float ratio = dss.notfull_n ? ((float)dss.fullbuf_n / (float)dss.notfull_n) : 0;
+    SERIAL_PADDED_PGM("BufferFullRatio:", 25);
+    SERIAL_PROTOCOLLN(dtostrf(ratio, 6, 2, str));
+
+    #if ENABLED(G331_DETAILS)
+
+      SERIAL_PADDED_PGM("LastSegmentFeedrate:", 25);
+      SERIAL_PROTOCOL(dtostrf(dss.last_feedrate,7,1,str));
+      SERIAL_PROTOCOLPGM("mm/s (");
+      SERIAL_PROTOCOL(dtostrf(dss.last_feedrate * 60,0,0,str));
+      SERIAL_PROTOCOLLNPGM("mm/m)");
+
+      SERIAL_PADDED_PGM("LastSegmentLength:", 25);
+      SERIAL_PROTOCOL(dtostrf(dss.last_seg_length,7,3,str));
+      SERIAL_PROTOCOLLNPGM("mm");
+
+      const float seg_time = dss.last_feedrate ? 1000 * (dss.last_seg_length / dss.last_feedrate) : 0;
+      SERIAL_PADDED_PGM("TimePerSegmentAtRate:", 25);
+      SERIAL_PROTOCOL(dtostrf(seg_time,7,3,str));
+      SERIAL_PROTOCOLLNPGM("ms");
+
+      SERIAL_PADDED_PGM("AvgDeltaKinetmatics:", 25);
+      delta_timing_report_t_n(dss.kinematics_t, dss.kinematics_n);
+
+      float    tot_bufferline_t = 0;
+      uint32_t tot_bufferline_n = 0;
+
+      for (uint8_t i = 0; i<BLOCK_BUFFER_SIZE-1; i++) {
+
+        tot_bufferline_t += dss.bufferline_t[i];
+        tot_bufferline_n += dss.bufferline_n[i];
+
+        #if ENABLED(G331_DETAILS)
+          SERIAL_PROTOCOLPGM("AvgBufferLineAtDepth[");
+          SERIAL_PROTOCOL(dtostrf(i,2,0,str)); // %2d
+          SERIAL_PROTOCOLPGM("]:");
+          delta_timing_report_t_n(dss.bufferline_t[i], dss.bufferline_n[i]);
+        #endif
+      }
+
+      SERIAL_PADDED_PGM("AvgBufferLineNotFull:", 25);
+      delta_timing_report_t_n(tot_bufferline_t, tot_bufferline_n);
+
+      constexpr uint8_t full = BLOCK_BUFFER_SIZE-1;
+      SERIAL_PADDED_PGM("AvgBufferLineFull:", 25);
+      delta_timing_report_t_n(dss.bufferline_t[full], dss.bufferline_n[full]);
+
+    #endif
+  }
+
+  void gcode_G331() {
+
+    if (parser.seen('E')) {             // Enable
+      delta_timing_init();
+    }
+    else if (parser.seen('D')) {        // Disable
+      dss.enabled = false;
+    }
+
+    if (parser.seen('T')) {             // Test
+
+      float test_feedrate  = feedrate_mm_s;
+      float saved_feedrate = feedrate_mm_s;
+      float saved_dss      = delta_segments_per_second;
+
+      if (parser.seen('F')) {           // Feedrate
+        if (parser.value_linear_units() > 0.0) {
+          test_feedrate = MMM_TO_MMS(parser.value_feedrate());
+        }
+      }
+
+      delta_timing_init();              // implicit Enable
+      delta_timing_test(test_feedrate); // perform Test
+      delta_timing_report();            // implicit Report
+      dss.enabled = false;              // implicit Disable
+      feedrate_mm_s = saved_feedrate;   // restore feedrate
+
+      if (parser.seen('K')) {           // Keep new delta_segments_per_second
+        SERIAL_PROTOCOLLNPGM("Keeping new value");
+        #if ENABLED(EEPROM_SETTINGS)
+          SERIAL_PROTOCOLLNPGM("Use M500 to save to EEPROM");
+        #endif
+      } else {
+        delta_segments_per_second = saved_dss;  // restore original
+        SERIAL_PROTOCOLLNPGM("Not saved");
+      }
+
+    } else if (parser.seen('R')) {      // Report
+      delta_timing_report();
+    }
+
+  }
+
+#endif // G331_DSS
+
 #if ENABLED(G38_PROBE_TARGET)
 
   static bool G38_run_probe() {
@@ -8108,7 +8316,13 @@ inline void gcode_M205() {
    *    X = Alpha (Tower 1) angle trim
    *    Y = Beta (Tower 2) angle trim
    *    Z = Rotate A and B by this angle
+   *    Q = Query settings
    */
+
+  void report_delta_settings() {
+
+  }
+
   inline void gcode_M665() {
     if (parser.seen('H')) {
       home_offset[Z_AXIS] = parser.value_linear_units() - DELTA_HEIGHT;
@@ -8126,6 +8340,7 @@ inline void gcode_M205() {
       delta_tower_angle_trim[B_AXIS] -= parser.value_float();
     }
     recalc_delta_settings(delta_radius, delta_diagonal_rod);
+    if (parser.seen('Q')) report_delta_settings();
   }
   /**
    * M666: Set delta endstop adjustment
@@ -9643,7 +9858,7 @@ inline void gcode_M355() {
   #if HAS_CASE_LIGHT
     uint8_t args = 0;
     if (parser.seen('P')) ++args, case_light_brightness = parser.value_byte();
-    if (parser.seen('S')) ++args, case_light_on = parser.value_bool(); 
+    if (parser.seen('S')) ++args, case_light_on = parser.value_bool();
     if (args) update_case_light();
 
     // always report case light status
@@ -10272,6 +10487,12 @@ void process_next_command() {
       #if ENABLED(AUTO_BED_LEVELING_BILINEAR) || ENABLED(AUTO_BED_LEVELING_UBL) || ENABLED(MESH_BED_LEVELING)
         case 42:
           gcode_G42();
+          break;
+      #endif
+
+      #if ENABLED(G331_DSS)
+        case 331:
+          gcode_G331();
           break;
       #endif
 
@@ -11108,6 +11329,9 @@ void ok_to_send() {
     /**
      * Fast inverse sqrt from Quake III Arena
      * See: https://en.wikipedia.org/wiki/Fast_inverse_square_root
+     *
+     * NOTE: Tested on RAMPS 1.4/Atmega2560 this is 2X SLOWER than
+     *       built-in sqrt function.
      */
     float Q_rsqrt(float number) {
       long i;

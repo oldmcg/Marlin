@@ -480,4 +480,21 @@ FORCE_INLINE bool position_is_reachable_xy(const float &lx, const float &ly) {
   return position_is_reachable_raw_xy(RAW_X_POSITION(lx), RAW_Y_POSITION(ly));
 }
 
+#if ENABLED(G331_DSS)
+  struct _DSS {
+    bool     enabled;
+    uint32_t fullbuf_n;
+    uint32_t notfull_n;
+    #if ENABLED(G331_DETAILS)
+      float    last_seg_length;                 // most recent XY segment length
+      float    last_feedrate;                   // most recent XY movement feedrate
+      uint32_t kinematics_t;                    // delta kinematics microseconds accumulator
+      uint32_t kinematics_n;                    // number of samples
+      uint32_t bufferline_t[BLOCK_BUFFER_SIZE]; // buffer_line time for each plan queue length
+      uint32_t bufferline_n[BLOCK_BUFFER_SIZE]; // number of samples
+    #endif
+  };
+
+#endif // G331_DSS
+
 #endif // MARLIN_H

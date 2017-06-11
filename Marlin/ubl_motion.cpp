@@ -475,16 +475,12 @@
 
   #if UBL_DELTA
 
-    // macro to inline copy exactly 4 floats, don't rely on sizeof operator
-    #define COPY_XYZE( target, source ) { \
-                target[X_AXIS] = source[X_AXIS]; \
-                target[Y_AXIS] = source[Y_AXIS]; \
-                target[Z_AXIS] = source[Z_AXIS]; \
-                target[E_AXIS] = source[E_AXIS]; \
-            }
-
     #if IS_SCARA // scale the feed rate from mm/s to degrees/s
       static float scara_feed_factor, scara_oldA, scara_oldB;
+    #endif
+
+    #if ENABLED(G331_DSS)
+      extern struct _DSS dss;
     #endif
 
     // We don't want additional apply_leveling() performed by regular buffer_line or buffer_line_kinematic,
@@ -493,6 +489,17 @@
     inline void _O2 ubl_buffer_segment_raw( float rx, float ry, float rz, float le, float fr ) {
 
       #if ENABLED(DELTA)  // apply delta inverse_kinematics
+
+        #if ENABLED(G331_DSS)
+          const bool dss_enabled = dss.enabled;
+        #endif
+
+        #if ENABLED(G331_DETAILS)
+          uint32_t u0=0, u1=0, u2=0;
+          uint8_t  pd=0;
+
+          if (dss_enabled) u0 = micros();
+        #endif
 
         const float delta_A = rz + sqrt( delta_diagonal_rod_2_tower[A_AXIS]
                                          - HYPOT2( delta_tower[A_AXIS][X_AXIS] - rx,
@@ -506,7 +513,39 @@
                                          - HYPOT2( delta_tower[C_AXIS][X_AXIS] - rx,
                                                    delta_tower[C_AXIS][Y_AXIS] - ry ));
 
+        #if ENABLED(G331_DETAILS)
+          if (dss_enabled) {
+            u1 = micros();
+            pd = planner.movesplanned();    // get planner depth before calling
+          }
+        #endif
+
+        #if ENABLED(G331_DSS)
+          if (dss_enabled) {
+            planner.is_full() ? ++dss.fullbuf_n : ++dss.notfull_n;
+          }
+        #endif
+
         planner._buffer_line(delta_A, delta_B, delta_C, le, fr, active_extruder);
+
+        #if ENABLED(G331_DETAILS)
+          if (dss_enabled) {
+            u2 = micros();
+
+            const uint32_t uK = (u1 > u0) ? (u1 - u0) : 0;
+            const uint32_t uB = (u2 > u1) ? (u2 - u1) : 0;
+
+            if (uK) {
+              dss.kinematics_t += uK;
+              dss.kinematics_n += 1;
+            }
+
+            if (uB) {
+              dss.bufferline_t[pd] += uB;
+              dss.bufferline_n[pd] += 1;
+            }
+          }
+        #endif
 
       #elif IS_SCARA  // apply scara inverse_kinematics (should be changed to save raw->logical->raw)
 
@@ -570,6 +609,13 @@
 
       NOLESS(segments, 1);                        // must have at least one segment
       const float inv_segments = 1.0 / segments;  // divide once, multiply thereafter
+
+      #if ENABLED(G331_DSS)
+        if (dss.enabled && segments > 1) {
+          dss.last_seg_length = cartesian_xy_mm * inv_segments;
+          dss.last_feedrate   = feedrate;
+        }
+      #endif
 
       #if IS_SCARA // scale the feed rate from mm/s to degrees/s
         scara_feed_factor = cartesian_xy_mm * inv_segments * feedrate;
