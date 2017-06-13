@@ -92,6 +92,7 @@
                     g29_repetition_cnt,
                     g29_storage_slot,
                     g29_map_type,
+                    g29_stow_each,
                     g29_grid_size;
       static bool   g29_c_flag, g29_x_flag, g29_y_flag;
       static float  g29_x_pos, g29_y_pos,
@@ -119,10 +120,13 @@
       static bool g29_parameter_parsing();
       static void find_mean_mesh_height();
       static void shift_mesh_height();
-      static void probe_entire_mesh(const float &lx, const float &ly, const bool do_ubl_mesh_map, const bool stow_probe, bool do_furthest);
+      static void probe_entire_mesh(const float &lx, const float &ly, const bool do_ubl_mesh_map, bool do_furthest);
       static void manually_probe_remaining_mesh(const float&, const float&, const float&, const float&, const bool);
-      static void tilt_mesh_based_on_3pts(const float &z1, const float &z2, const float &z3);
-      static void tilt_mesh_based_on_probed_grid(const bool do_ubl_mesh_map);
+      static void tilt_mesh_based_on_3pts();
+      static void tilt_mesh_based_on_probed_grid();
+      static void tilt_mesh_based_on_probed_circle();
+      static void apply_tilt_to_mesh(struct linear_fit_data &lsf_results);
+
       static void g29_what_command();
       static void g29_eeprom_dump();
       static void g29_compare_current_mesh_to_stored_mesh();
