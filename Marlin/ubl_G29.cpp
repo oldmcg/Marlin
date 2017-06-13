@@ -395,32 +395,32 @@
     if (parser.seen('J')) {
 
       save_ubl_active_state_and_disable();
-      
+
       #if ENABLED(DELTA)
-      
+
         tilt_mesh_based_on_probed_circle();
-        
+
       #else // square bed
-      
+
         if (g29_grid_size) {  // if not 0 it is a normal n x n grid being probed
           tilt_mesh_based_on_probed_grid();
         }
         else { // grid_size == 0 : A 3-Point leveling has been requested
           tilt_mesh_based_on_3pts();
         }
-        
+
       #endif // square bed
-      
+
       STOW_PROBE();
-      
+
       do_blocking_move_to_xy(
-        LOGICAL_X_POSITION(0.5 * (UBL_MESH_MAX_X - (UBL_MESH_MIN_X))), 
+        LOGICAL_X_POSITION(0.5 * (UBL_MESH_MAX_X - (UBL_MESH_MIN_X))),
         LOGICAL_Y_POSITION(0.5 * (UBL_MESH_MAX_Y - (UBL_MESH_MIN_Y)))
         );
 
       if ( parser.seen('T'))
         display_map(g29_map_type);
-      
+
       restore_ubl_active_state_and_leave();
     }
 
@@ -838,41 +838,41 @@
   #if DISABLED(DELTA) // square bed
 
     void unified_bed_leveling::tilt_mesh_based_on_3pts() {
-      
+
       float z3, z2, z1 = probe_pt(LOGICAL_X_POSITION(UBL_PROBE_PT_1_X), LOGICAL_Y_POSITION(UBL_PROBE_PT_1_Y), g29_stow_each, g29_verbose_level);
       if (!isnan(z1)) {
         z2 = probe_pt(LOGICAL_X_POSITION(UBL_PROBE_PT_2_X), LOGICAL_Y_POSITION(UBL_PROBE_PT_2_Y), g29_stow_each, g29_verbose_level);
         if (!isnan(z2))
           z3 = probe_pt(LOGICAL_X_POSITION(UBL_PROBE_PT_3_X), LOGICAL_Y_POSITION(UBL_PROBE_PT_3_Y), g29_stow_each, g29_verbose_level);
       }
-  
+
       if (isnan(z1) || isnan(z2) || isnan(z3)) { // probe_pt will return NAN if unreachable
         SERIAL_ERROR_START();
         SERIAL_ERRORLNPGM("Attempt to probe off the bed.");
         return;
       }
-  
+
       // Adjust z1, z2, z3 by the Mesh Height at these points. Just because they're non-zero
       // doesn't mean the Mesh is tilted! (Compensate each probe point by what the Mesh says
       // its height is.)
-  
+
       z1 -= get_z_correction(LOGICAL_X_POSITION(UBL_PROBE_PT_1_X), LOGICAL_Y_POSITION(UBL_PROBE_PT_1_Y)) /* + zprobe_zoffset */ ;
       z2 -= get_z_correction(LOGICAL_X_POSITION(UBL_PROBE_PT_2_X), LOGICAL_Y_POSITION(UBL_PROBE_PT_2_Y)) /* + zprobe_zoffset */ ;
       z3 -= get_z_correction(LOGICAL_X_POSITION(UBL_PROBE_PT_3_X), LOGICAL_Y_POSITION(UBL_PROBE_PT_3_Y)) /* + zprobe_zoffset */ ;
-  
+
       matrix_3x3 rotation;
       vector_3 v1 = vector_3( (UBL_PROBE_PT_1_X - UBL_PROBE_PT_2_X),
                               (UBL_PROBE_PT_1_Y - UBL_PROBE_PT_2_Y),
                               (z1 - z2) ),
-  
+
                v2 = vector_3( (UBL_PROBE_PT_3_X - UBL_PROBE_PT_2_X),
                               (UBL_PROBE_PT_3_Y - UBL_PROBE_PT_2_Y),
                               (z3 - z2) ),
-  
+
                normal = vector_3::cross(v1, v2);
-  
+
       normal = normal.get_normal();
-  
+
       /**
        * This vector is normal to the tilted plane.
        * However, we don't know its direction. We need it to point up. So if
@@ -883,9 +883,9 @@
         normal.y = -normal.y;
         normal.z = -normal.z;
       }
-  
+
       rotation = matrix_3x3::create_look_at(vector_3(normal.x, normal.y, 1));
-  
+
       if (g29_verbose_level > 2) {
         SERIAL_ECHOPGM("bed plane normal = [");
         SERIAL_PROTOCOL_F(normal.x, 7);
@@ -896,20 +896,20 @@
         SERIAL_ECHOLNPGM("]");
         rotation.debug(PSTR("rotation matrix:"));
       }
-  
+
       //
       // All of 3 of these points should give us the same d constant
       //
-  
+
       float t = normal.x * (UBL_PROBE_PT_1_X) + normal.y * (UBL_PROBE_PT_1_Y),
             d = t + normal.z * z1;
-  
+
       if (g29_verbose_level>2) {
         SERIAL_ECHOPGM("D constant: ");
         SERIAL_PROTOCOL_F(d, 7);
         SERIAL_ECHOLNPGM(" ");
       }
-  
+
       #if ENABLED(DEBUG_LEVELING_FEATURE)
         if (DEBUGGING(LEVELING)) {
           SERIAL_ECHOPGM("d from 1st point: ");
@@ -927,7 +927,7 @@
           SERIAL_EOL();
         }
       #endif
-  
+
       for (uint8_t i = 0; i < GRID_MAX_POINTS_X; i++) {
         for (uint8_t j = 0; j < GRID_MAX_POINTS_Y; j++) {
           float x_tmp = mesh_index_to_xpos(i),
@@ -962,7 +962,7 @@
         }
       }
     }
-  
+
   #endif // DISABLED(DELTA), square bed
 
   #if ENABLED(NEWPANEL)
@@ -1657,18 +1657,18 @@
   #if DISABLED(DELTA) // square bed
 
     void unified_bed_leveling::tilt_mesh_based_on_probed_grid() {
-  
+
       struct linear_fit_data lsf_results;
       incremental_LSF_reset(&lsf_results);
-  
+
       constexpr int16_t x_min = max(MIN_PROBE_X, UBL_MESH_MIN_X),
                         x_max = min(MAX_PROBE_X, UBL_MESH_MAX_X),
                         y_min = max(MIN_PROBE_Y, UBL_MESH_MIN_Y),
                         y_max = min(MAX_PROBE_Y, UBL_MESH_MAX_Y);
-  
+
       const float dx = float(x_max - x_min) / (g29_grid_size - 1.0),
                   dy = float(y_max - y_min) / (g29_grid_size - 1.0);
-  
+
       bool zig_zag = false;
       for (uint8_t ix = 0; ix < g29_grid_size; ix++) {
         const float x = float(x_min) + ix * dx;
@@ -1692,9 +1692,9 @@
               SERIAL_PROTOCOL_F(get_z_correction(LOGICAL_X_POSITION(x), LOGICAL_Y_POSITION(y)), 7);
             }
           #endif
-  
+
           measured_z -= get_z_correction(LOGICAL_X_POSITION(x), LOGICAL_Y_POSITION(y)) /* + zprobe_zoffset */ ;
-  
+
           #if ENABLED(DEBUG_LEVELING_FEATURE)
             if (DEBUGGING(LEVELING)) {
               SERIAL_ECHOPGM("   final >>>---> ");
@@ -1702,18 +1702,18 @@
               SERIAL_EOL();
             }
           #endif
-  
+
           // probe failure, unreachable probe point, or invalid mesh points
           // can produce invalid result.  Only use result if valid.
-          
+
           if ( !isnan( measured_z )) {
-            incremental_LSF(&lsf_results, x, y, measured_z);  
+            incremental_LSF(&lsf_results, x, y, measured_z);
           }
         }
-  
+
         zig_zag ^= true;
       }
-  
+
     apply_tilt_to_mesh(lsf_results);
     }
 
@@ -1749,14 +1749,14 @@
             points = outer;
             radius = DELTA_PROBEABLE_RADIUS;
             break;
-          
+
           case 1:
             if (!inner) continue;
             points = inner;
             radius = DELTA_PROBEABLE_RADIUS / 2;
             break;
 
-          case 0: 
+          case 0:
             if (!center) continue;  // will exit loop
             points = 1;
             radius = 0;
@@ -1765,22 +1765,22 @@
 
         float theta = RADIANS(90);              // start at rear tower
         float next  = RADIANS(360) / points;    // around the bed
-  
+
         for (uint8_t i = 0; i < points; i++) {
-          
+
           const float rx = radius * sin(theta);
           const float ry = radius * cos(theta);
           const float lx = LOGICAL_X_POSITION(rx);
           const float ly = LOGICAL_Y_POSITION(ry);
-          
+
           float measured_z = probe_pt(lx, ly, g29_stow_each, g29_verbose_level);
-  
+
           measured_z -= get_z_correction(lx, ly) /* + zprobe_zoffset */ ;
-  
+
           if ( !isnan( measured_z )) {
             incremental_LSF(&lsf_results, rx, ry, measured_z);
           }
-          
+
           theta = theta + next;
           if (theta >= RADIANS(360)) theta -= RADIANS(360);
         }
@@ -1792,7 +1792,7 @@
   #endif // DELTA
 
   void unified_bed_leveling::apply_tilt_to_mesh(struct linear_fit_data &lsf_results) {
-    
+
     if (( lsf_results.N < 3 ) || finish_incremental_LSF(&lsf_results)) {
       SERIAL_ECHOPGM("Insufficient data for tilt");
       return;
